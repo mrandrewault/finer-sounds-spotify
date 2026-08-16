@@ -46,7 +46,11 @@ export async function getAccessToken() {
 }
 
 async function spotifyFetch(path: string, accessToken: string, init: RequestInit = {}) {
-  const res = await fetch(`${API}${path}`, {
+  // Spotify pagination "next" URLs already contain /v1.
+  // Internally we always want paths relative to https://api.spotify.com/v1.
+  const normalizedPath = path.startsWith("/v1/") ? path.slice(3) : path;
+
+  const res = await fetch(`${API}${normalizedPath}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -57,10 +61,28 @@ async function spotifyFetch(path: string, accessToken: string, init: RequestInit
   });
 
   if (!res.ok) {
-    throw new Error(`Spotify API ${path} failed: ${res.status} ${await res.text()}`);
+    throw new Error(
+      `Spotify API ${normalizedPath} failed: ${res.status} ${await res.text()}`
+    );
   }
 
   return res.status === 204 ? null : res.json();
+}
+
+function nextSpotifyPath(nextUrl: string | null | undefined) {
+  if (!nextUrl) return "";
+
+  const url = new URL(nextUrl);
+  let path = url.pathname;
+
+  // nextUrl from Spotify looks like https://api.spotify.com/v1/...
+  // spotifyFetch already prefixes https://api.spotify.com/v1,
+  // so strip exactly one leading /v1 here.
+  if (path.startsWith("/v1/")) {
+    path = path.slice(3);
+  }
+
+  return path + url.search;
 }
 
 export async function findPlaylistByName(name: string, accessToken: string) {
@@ -83,9 +105,7 @@ export async function findPlaylistByName(name: string, accessToken: string) {
       }
     }
 
-    path = data.next
-      ? new URL(data.next).pathname + new URL(data.next).search
-      : "";
+    path = nextSpotifyPath(data.next);
   }
 
   return null;
@@ -102,15 +122,16 @@ export async function getAlbumTrackUris(albumId: string, accessToken: string) {
       if (item?.uri) uris.push(item.uri);
     }
 
-    path = data.next
-      ? new URL(data.next).pathname + new URL(data.next).search
-      : "";
+    path = nextSpotifyPath(data.next);
   }
 
   return uris;
 }
 
-export async function getPlaylistTrackUris(playlistId: string, accessToken: string) {
+export async function getPlaylistTrackUris(
+  playlistId: string,
+  accessToken: string
+) {
   const uris = new Set<string>();
   let path = `/playlists/${playlistId}/items?limit=100`;
 
@@ -122,9 +143,7 @@ export async function getPlaylistTrackUris(playlistId: string, accessToken: stri
       if (uri) uris.add(uri);
     }
 
-    path = data.next
-      ? new URL(data.next).pathname + new URL(data.next).search
-      : "";
+    path = nextSpotifyPath(data.next);
   }
 
   return uris;
