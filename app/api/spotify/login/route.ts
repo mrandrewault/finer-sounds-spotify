@@ -1,14 +1,35 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 
+function b64url(input: Buffer | string) {
+  return Buffer.from(input).toString("base64url");
+}
+
+function signState(payload: string, secret: string) {
+  return crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+}
+
 export async function GET() {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
   const appUrl = process.env.APP_URL;
-  if (!clientId || !appUrl) {
-    return NextResponse.json({ error: "Set SPOTIFY_CLIENT_ID and APP_URL first." }, { status: 500 });
+
+  if (!clientId || !clientSecret || !appUrl) {
+    return NextResponse.json(
+      { error: "Set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, and APP_URL first." },
+      { status: 500 }
+    );
   }
 
-  const state = crypto.randomBytes(16).toString("hex");
+  const statePayload = JSON.stringify({
+    nonce: crypto.randomBytes(16).toString("hex"),
+    issuedAt: Date.now()
+  });
+
+  const encodedPayload = b64url(statePayload);
+  const signature = signState(encodedPayload, clientSecret);
+  const state = `${encodedPayload}.${signature}`;
+
   const scope = [
     "playlist-read-private",
     "playlist-modify-private",
@@ -24,13 +45,7 @@ export async function GET() {
     show_dialog: "true"
   });
 
-  const response = NextResponse.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
-  response.cookies.set("spotify_oauth_state", state, {
-    httpOnly: true,
-    secure: appUrl.startsWith("https://"),
-    sameSite: "lax",
-    maxAge: 600,
-    path: "/"
-  });
-  return response;
+  return NextResponse.redirect(
+    `https://accounts.spotify.com/authorize?${params.toString()}`
+  );
 }
