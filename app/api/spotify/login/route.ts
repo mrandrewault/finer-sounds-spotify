@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 
-function b64url(input: Buffer | string) {
-  return Buffer.from(input).toString("base64url");
-}
-
-function signState(payload: string, secret: string) {
-  return crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+function sign(value: string, secret: string) {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(value)
+    .digest("hex")
+    .slice(0, 32);
 }
 
 export async function GET() {
@@ -16,19 +16,17 @@ export async function GET() {
 
   if (!clientId || !clientSecret || !appUrl) {
     return NextResponse.json(
-      { error: "Set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, and APP_URL first." },
+      { error: "Missing SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, or APP_URL." },
       { status: 500 }
     );
   }
 
-  const statePayload = JSON.stringify({
-    nonce: crypto.randomBytes(16).toString("hex"),
-    issuedAt: Date.now()
-  });
-
-  const encodedPayload = b64url(statePayload);
-  const signature = signState(encodedPayload, clientSecret);
-  const state = `${encodedPayload}.${signature}`;
+  // Keep OAuth state deliberately short and URL-safe.
+  // Format: timestamp.nonce.signature
+  const timestamp = Date.now().toString(36);
+  const nonce = crypto.randomBytes(8).toString("hex");
+  const unsignedState = `${timestamp}.${nonce}`;
+  const state = `${unsignedState}.${sign(unsignedState, clientSecret)}`;
 
   const scope = [
     "playlist-read-private",

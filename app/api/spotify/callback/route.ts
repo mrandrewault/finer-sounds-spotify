@@ -1,37 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 
-const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+const MAX_STATE_AGE_MS = 10 * 60 * 1000;
+
+function sign(value: string, secret: string) {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(value)
+    .digest("hex")
+    .slice(0, 32);
+}
 
 function safeEqual(a: string, b: string) {
-  const aBuf = Buffer.from(a);
-  const bBuf = Buffer.from(b);
-  return aBuf.length === bBuf.length && crypto.timingSafeEqual(aBuf, bBuf);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 function verifyState(state: string, secret: string) {
-  const [encodedPayload, providedSignature] = state.split(".");
-  if (!encodedPayload || !providedSignature) return false;
+  const parts = state.split(".");
+  if (parts.length !== 3) return false;
 
-  const expectedSignature = crypto
-    .createHmac("sha256", secret)
-    .update(encodedPayload)
-    .digest("base64url");
+  const [timestamp36, nonce, providedSignature] = parts;
+  if (!timestamp36 || !nonce || !providedSignature) return false;
+
+  const unsignedState = `${timestamp36}.${nonce}`;
+  const expectedSignature = sign(unsignedState, secret);
 
   if (!safeEqual(providedSignature, expectedSignature)) return false;
 
-  try {
-    const payload = JSON.parse(
-      Buffer.from(encodedPayload, "base64url").toString("utf8")
-    );
+  const timestamp = parseInt(timestamp36, 36);
+  if (!Number.isFinite(timestamp)) return false;
 
-    if (!payload?.nonce || typeof payload?.issuedAt !== "number") return false;
-
-    const age = Date.now() - payload.issuedAt;
-    return age >= 0 && age <= STATE_MAX_AGE_MS;
-  } catch {
-    return false;
-  }
+  const age = Date.now() - timestamp;
+  return age >= 0 && age <= MAX_STATE_AGE_MS;
 }
 
 export async function GET(req: NextRequest) {
@@ -96,32 +97,20 @@ export async function GET(req: NextRequest) {
 
   if (!refreshToken) {
     return NextResponse.json(
-      {
-        error:
-          "Spotify connected, but no refresh token was returned. Return to the app and click Connect Spotify again."
-      },
+      { error: "Spotify connected, but no refresh token was returned. Please connect again." },
       { status: 500 }
     );
   }
-
-  const approximateReconnectDate = new Date(
-    Date.now() + 180 * 24 * 60 * 60 * 1000
-  ).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric"
-  });
 
   return new NextResponse(
     `<!doctype html>
     <html>
       <body style="font-family:system-ui,sans-serif;max-width:760px;margin:60px auto;padding:24px;line-height:1.5">
         <h1>Spotify connected.</h1>
-        <p>Copy the refresh token below into the Vercel environment variable <code>SPOTIFY_REFRESH_TOKEN</code>.</p>
+        <p>Copy the refresh token below into Vercel as <code>SPOTIFY_REFRESH_TOKEN</code>.</p>
         <textarea readonly style="width:100%;height:160px;padding:12px;font-family:monospace">${refreshToken}</textarea>
         <p><strong>Keep this token private.</strong> Do not paste it into GitHub or send it in a screenshot.</p>
-        <p>Spotify currently gives Development Mode refresh tokens a 180-day lifetime. Plan to reconnect around <strong>${approximateReconnectDate}</strong>.</p>
-        <p>If the automation later reports that Spotify authorization expired, return to the app, click <strong>Connect Spotify</strong> again, replace the refresh token in Vercel, and redeploy.</p>
+        <p>After saving it in Vercel, redeploy the project.</p>
       </body>
     </html>`,
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
