@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getNewArrivalProductUrls, inspectProduct } from "../../../lib/finerSounds";
 import {
   addItemsToPlaylist,
+  findPlaylistByName,
   getAccessToken,
   getAlbumTrackUris,
   getPlaylistTrackUris
@@ -13,20 +14,25 @@ export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   const auth = req.headers.get("authorization");
 
-  // Vercel Cron sends Authorization: Bearer <CRON_SECRET> when CRON_SECRET is configured.
-  // For a manual browser test, allow the request only when CRON_SECRET is not configured.
   if (cronSecret && auth !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const playlistId = process.env.SPOTIFY_PLAYLIST_ID;
-  if (!playlistId) {
-    return NextResponse.json({ error: "Missing SPOTIFY_PLAYLIST_ID" }, { status: 500 });
-  }
-
   try {
     const accessToken = await getAccessToken();
-    const existing = await getPlaylistTrackUris(playlistId, accessToken);
+    const playlist = await findPlaylistByName("Finer Sounds", accessToken);
+
+    if (!playlist) {
+      return NextResponse.json(
+        {
+          error:
+            'Could not find a Spotify playlist named "Finer Sounds" in the connected Spotify account.'
+        },
+        { status: 404 }
+      );
+    }
+
+    const existing = await getPlaylistTrackUris(playlist.id, accessToken);
     const productUrls = await getNewArrivalProductUrls();
 
     const productsWithSpotify = [];
@@ -34,7 +40,10 @@ export async function GET(req: NextRequest) {
 
     for (const url of productUrls) {
       const product = await inspectProduct(url);
-      if (!product.spotifyAlbumIds.length && !product.spotifyTrackUris.length) continue;
+
+      if (!product.spotifyAlbumIds.length && !product.spotifyTrackUris.length) {
+        continue;
+      }
 
       productsWithSpotify.push({
         title: product.title,
@@ -43,8 +52,9 @@ export async function GET(req: NextRequest) {
       });
 
       candidateUris.push(...product.spotifyTrackUris);
+
       for (const albumId of product.spotifyAlbumIds) {
-        candidateUris.push(...await getAlbumTrackUris(albumId, accessToken));
+        candidateUris.push(...(await getAlbumTrackUris(albumId, accessToken)));
       }
     }
 
@@ -52,11 +62,16 @@ export async function GET(req: NextRequest) {
     const newUris = uniqueCandidateUris.filter((uri) => !existing.has(uri));
 
     if (newUris.length) {
-      await addItemsToPlaylist(playlistId, newUris, accessToken);
+      await addItemsToPlaylist(playlist.id, newUris, accessToken);
     }
 
     return NextResponse.json({
       ok: true,
+      playlist: {
+        name: playlist.name,
+        id: playlist.id,
+        owner: playlist.ownerDisplayName
+      },
       finerSoundsProductsScanned: productUrls.length,
       productsWithSpotify: productsWithSpotify.length,
       spotifyItemsFound: uniqueCandidateUris.length,
@@ -66,6 +81,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error(error);
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

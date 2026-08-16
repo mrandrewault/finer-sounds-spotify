@@ -63,6 +63,34 @@ async function spotifyFetch(path: string, accessToken: string, init: RequestInit
   return res.status === 204 ? null : res.json();
 }
 
+export async function findPlaylistByName(name: string, accessToken: string) {
+  let path = `/me/playlists?limit=50`;
+
+  while (path) {
+    const data = await spotifyFetch(path, accessToken);
+
+    for (const playlist of data.items || []) {
+      if (
+        playlist?.name &&
+        playlist?.id &&
+        playlist.name.trim().toLowerCase() === name.trim().toLowerCase()
+      ) {
+        return {
+          id: playlist.id as string,
+          name: playlist.name as string,
+          ownerDisplayName: playlist.owner?.display_name || null
+        };
+      }
+    }
+
+    path = data.next
+      ? new URL(data.next).pathname + new URL(data.next).search
+      : "";
+  }
+
+  return null;
+}
+
 export async function getAlbumTrackUris(albumId: string, accessToken: string) {
   const uris: string[] = [];
   let path = `/albums/${albumId}/tracks?limit=50`;
@@ -74,7 +102,9 @@ export async function getAlbumTrackUris(albumId: string, accessToken: string) {
       if (item?.uri) uris.push(item.uri);
     }
 
-    path = data.next ? new URL(data.next).pathname + new URL(data.next).search : "";
+    path = data.next
+      ? new URL(data.next).pathname + new URL(data.next).search
+      : "";
   }
 
   return uris;
@@ -92,7 +122,9 @@ export async function getPlaylistTrackUris(playlistId: string, accessToken: stri
       if (uri) uris.add(uri);
     }
 
-    path = data.next ? new URL(data.next).pathname + new URL(data.next).search : "";
+    path = data.next
+      ? new URL(data.next).pathname + new URL(data.next).search
+      : "";
   }
 
   return uris;
