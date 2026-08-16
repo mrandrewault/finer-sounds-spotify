@@ -1,20 +1,25 @@
-FINER SOUNDS → SPOTIFY: PAGINATION FIX
+FINER SOUNDS → SPOTIFY: RATE-LIMIT FIX
 
 Replace exactly this file in GitHub:
 
-lib/spotify.ts
+lib/finerSounds.ts
 
-Why:
-Your Finer Sounds playlist has more than 100 songs. Spotify returned a normal
-next-page URL containing /v1/, but the old code prefixed another /v1/. That
-made page 2 request /v1/v1/playlists/... and fail.
-
-This replacement normalizes all Spotify pagination URLs correctly.
+What this changes:
+- Sorts Finer Sounds New Arrivals newest-first.
+- Scans only the newest 60 products instead of the entire collection.
+- Waits 550ms between product-page requests.
+- Retries HTTP 429 responses with exponential backoff.
+- Honors Finer Sounds' Retry-After header when present.
 
 Steps:
-1. Upload lib/spotify.ts into the existing /lib folder in GitHub, replacing the old file.
-2. Commit to main.
+1. Upload lib/finerSounds.ts into the existing /lib folder in GitHub.
+2. Replace the old file and commit to main.
 3. Wait for Vercel to show the deployment as Ready.
-4. Open:
+4. Because you've just triggered several test runs, wait about 10–20 minutes before testing again.
+5. Then open:
    https://finer-sounds-spotify.vercel.app/api/run
-5. If successful, the JSON should contain "ok": true and an "added" count.
+
+If the response contains "ok": true and "added": a number, check Spotify.
+
+The normal Saturday automation should be much less likely to hit a rate limit
+because it will run only once per week.
